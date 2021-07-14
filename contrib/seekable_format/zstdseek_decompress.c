@@ -60,7 +60,6 @@
 #include <assert.h>
 
 #define XXH_STATIC_LINKING_ONLY
-#define XXH_NAMESPACE ZSTD_
 #include "xxhash.h"
 
 #define ZSTD_STATIC_LINKING_ONLY
@@ -176,7 +175,7 @@ struct ZSTD_seekable_s {
 
 ZSTD_seekable* ZSTD_seekable_create(void)
 {
-    ZSTD_seekable* const zs = malloc(sizeof(ZSTD_seekable));
+    ZSTD_seekable* const zs = (ZSTD_seekable*)malloc(sizeof(ZSTD_seekable));
     if (zs == NULL) return NULL;
 
     /* also initializes stage to zsds_init */
@@ -202,7 +201,7 @@ size_t ZSTD_seekable_free(ZSTD_seekable* zs)
 
 ZSTD_seekTable* ZSTD_seekTable_create_fromSeekable(const ZSTD_seekable* zs)
 {
-    ZSTD_seekTable* const st = malloc(sizeof(ZSTD_seekTable));
+    ZSTD_seekTable* const st = (ZSTD_seekTable*)malloc(sizeof(ZSTD_seekTable));
     if (st==NULL) return NULL;
 
     st->checksumFlag = zs->seekTable.checksumFlag;
@@ -433,6 +432,11 @@ size_t ZSTD_seekable_initAdvanced(ZSTD_seekable* zs, ZSTD_seekable_customFile sr
 
 size_t ZSTD_seekable_decompress(ZSTD_seekable* zs, void* dst, size_t len, unsigned long long offset)
 {
+    unsigned long long const eos = zs->seekTable.entries[zs->seekTable.tableLen].dOffset;
+    if (offset + len > eos) {
+        len = eos - offset;
+    }
+
     U32 targetFrame = ZSTD_seekable_offsetToFrameIndex(zs, offset);
     U32 noOutputProgressCount = 0;
     size_t srcBytesRead = 0;
@@ -449,7 +453,7 @@ size_t ZSTD_seekable_decompress(ZSTD_seekable* zs, void* dst, size_t len, unsign
             zs->in = (ZSTD_inBuffer){zs->inBuff, 0, 0};
             XXH64_reset(&zs->xxhState, 0);
             ZSTD_DCtx_reset(zs->dstream, ZSTD_reset_session_only);
-            if (srcBytesRead > zs->buffWrapper.size) {
+            if (zs->buffWrapper.size && srcBytesRead > zs->buffWrapper.size) {
                 return ERROR(seekableIO);
             }
         }
@@ -502,6 +506,8 @@ size_t ZSTD_seekable_decompress(ZSTD_seekable* zs, void* dst, size_t len, unsign
                 if (zs->decompressedOffset < offset + len) {
                     /* go back to the start and force a reset of the stream */
                     targetFrame = ZSTD_seekable_offsetToFrameIndex(zs, zs->decompressedOffset);
+                    /* in this case it will fail later with corruption_detected, since last block does not have checksum */
+                    assert(targetFrame != zs->seekTable.tableLen);
                 }
                 break;
             }

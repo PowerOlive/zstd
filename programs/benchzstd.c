@@ -36,7 +36,7 @@
 #include "datagen.h"     /* RDG_genBuffer */
 #include "../lib/common/xxhash.h"
 #include "benchzstd.h"
-#include "../lib/common/zstd_errors.h"
+#include "../lib/zstd_errors.h"
 
 
 /* *************************************
@@ -67,17 +67,9 @@ static const size_t maxMemory = (sizeof(size_t)==4)  ?
 /* *************************************
 *  console display
 ***************************************/
-#define DISPLAY(...)         fprintf(stderr, __VA_ARGS__)
+#define DISPLAY(...)         { fprintf(stderr, __VA_ARGS__); fflush(NULL); }
 #define DISPLAYLEVEL(l, ...) if (displayLevel>=l) { DISPLAY(__VA_ARGS__); }
 /* 0 : no display;   1: errors;   2 : + result + interaction + warnings;   3 : + progression;   4 : + information */
-
-static const U64 g_refreshRate = SEC_TO_MICRO / 6;
-static UTIL_time_t g_displayClock = UTIL_TIME_INITIALIZER;
-
-#define DISPLAYUPDATE(l, ...) { if (displayLevel>=l) { \
-            if ((UTIL_clockSpanMicro(g_displayClock) > g_refreshRate) || (displayLevel>=4)) \
-            { g_displayClock = UTIL_getTime(); DISPLAY(__VA_ARGS__); \
-            if (displayLevel>=4) fflush(stderr); } } }
 
 
 /* *************************************
@@ -401,6 +393,8 @@ BMK_benchMemAdvancedNoAlloc(
         BMK_benchParams_t cbp, dbp;
         BMK_initCCtxArgs cctxprep;
         BMK_initDCtxArgs dctxprep;
+        UTIL_HumanReadableSize_t hr_isize;
+        UTIL_HumanReadableSize_t hr_osize;
 
         cbp.benchFn = local_defaultCompress;   /* ZSTD_compress2 */
         cbp.benchPayload = cctx;
@@ -437,8 +431,10 @@ BMK_benchMemAdvancedNoAlloc(
         dctxprep.dictBuffer = dictBuffer;
         dctxprep.dictBufferSize = dictBufferSize;
 
+        hr_isize = UTIL_makeHumanReadableSize((U64) srcSize);
+
         DISPLAYLEVEL(2, "\r%70s\r", "");   /* blank line */
-        DISPLAYLEVEL(2, "%2s-%-17.17s :%10u ->\r", marks[markNb], displayName, (unsigned)srcSize);
+        DISPLAYLEVEL(2, "%2s-%-17.17s : %.*f%s -> \r", marks[markNb], displayName, hr_isize.precision, hr_isize.value, hr_isize.suffix);
 
         while (!(compressionCompleted && decompressionCompleted)) {
             if (!compressionCompleted) {
@@ -459,9 +455,11 @@ BMK_benchMemAdvancedNoAlloc(
                 }   }
 
                 {   int const ratioAccuracy = (ratio < 10.) ? 3 : 2;
-                    DISPLAYLEVEL(2, "%2s-%-17.17s :%10u ->%10u (%5.*f),%6.*f MB/s\r",
+                    hr_osize = UTIL_makeHumanReadableSize((U64) cSize);
+                    DISPLAYLEVEL(2, "%2s-%-17.17s : %.*f%s -> %.*f%s (%5.*f), %6.*f MB/s\r",
                             marks[markNb], displayName,
-                            (unsigned)srcSize, (unsigned)cSize,
+                            hr_isize.precision, hr_isize.value, hr_isize.suffix,
+                            hr_osize.precision, hr_osize.value, hr_osize.suffix,
                             ratioAccuracy, ratio,
                             benchResult.cSpeed < (10 MB) ? 2 : 1, (double)benchResult.cSpeed / MB_UNIT);
                 }
@@ -482,9 +480,11 @@ BMK_benchMemAdvancedNoAlloc(
                 }
 
                 {   int const ratioAccuracy = (ratio < 10.) ? 3 : 2;
-                    DISPLAYLEVEL(2, "%2s-%-17.17s :%10u ->%10u (%5.*f),%6.*f MB/s ,%6.1f MB/s \r",
+                    hr_osize = UTIL_makeHumanReadableSize((U64) cSize);
+                    DISPLAYLEVEL(2, "%2s-%-17.17s : %.*f%s -> %.*f%s (%5.*f), %6.*f MB/s, %6.1f MB/s \r",
                             marks[markNb], displayName,
-                            (unsigned)srcSize, (unsigned)cSize,
+                            hr_isize.precision, hr_isize.value, hr_isize.suffix,
+                            hr_osize.precision, hr_osize.value, hr_osize.suffix,
                             ratioAccuracy, ratio,
                             benchResult.cSpeed < (10 MB) ? 2 : 1, (double)benchResult.cSpeed / MB_UNIT,
                             (double)benchResult.dSpeed / MB_UNIT);
@@ -768,7 +768,7 @@ static int BMK_loadFiles(void* buffer, size_t bufferSize,
         }
         {   FILE* const f = fopen(fileNamesTable[n], "rb");
             if (f==NULL) RETURN_ERROR_INT(10, "impossible to open file %s", fileNamesTable[n]);
-            DISPLAYUPDATE(2, "Loading %s...       \r", fileNamesTable[n]);
+            DISPLAYLEVEL(2, "Loading %s...       \r", fileNamesTable[n]);
             if (fileSize > bufferSize-pos) fileSize = bufferSize-pos, nbFiles=n;   /* buffer too small - stop after this file */
             {   size_t const readSize = fread(((char*)buffer)+pos, 1, (size_t)fileSize, f);
                 if (readSize != (size_t)fileSize) RETURN_ERROR_INT(11, "could not read %s", fileNamesTable[n]);

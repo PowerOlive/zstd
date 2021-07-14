@@ -148,7 +148,8 @@ static void usage(FILE* f, const char* programName)
     DISPLAY_F(f, " -D DICT: use DICT as Dictionary for compression or decompression \n");
     DISPLAY_F(f, " -o file: result stored into `file` (only 1 output file) \n");
     DISPLAY_F(f, " -f     : disable input and output checks. Allows overwriting existing files,\n");
-    DISPLAY_F(f, "          input from console, output to stdout, operating on links, etc.\n");
+    DISPLAY_F(f, "          input from console, output to stdout, operating on links,\n");
+    DISPLAY_F(f, "          block devices, etc.\n");
     DISPLAY_F(f, "--rm    : remove source file(s) after successful de/compression \n");
     DISPLAY_F(f, " -k     : preserve source file(s) (default) \n");
     DISPLAY_F(f, " -h/-H  : display help/long help and exit \n");
@@ -166,7 +167,8 @@ static void usage_advanced(const char* programName)
 
     DISPLAYOUT( " -v     : verbose mode; specify multiple times to increase verbosity \n");
     DISPLAYOUT( " -q     : suppress warnings; specify twice to suppress errors too \n");
-    DISPLAYOUT( "--no-progress : do not display the progress counter \n");
+    DISPLAYOUT( "--[no-]progress : forcibly display, or never display the progress counter.\n");
+    DISPLAYOUT( "                  note: any (de)compressed output to terminal will mix with progress counter text. \n");
 
 #ifdef UTIL_HAS_CREATEFILELIST
     DISPLAYOUT( " -r     : operate recursively on directories \n");
@@ -206,10 +208,12 @@ static void usage_advanced(const char* programName)
     DISPLAYOUT( "--fast[=#]: switch to very fast compression levels (default: %u) \n", 1);
     DISPLAYOUT( "--adapt : dynamically adapt compression level to I/O conditions \n");
     DISPLAYOUT( "--[no-]row-match-finder : force enable/disable usage of fast row-based matchfinder for greedy, lazy, and lazy2 strategies \n");
+    DISPLAYOUT( "--patch-from=FILE : specify the file to be used as a reference point for zstd's diff engine. \n");
 # ifdef ZSTD_MULTITHREAD
     DISPLAYOUT( " -T#    : spawns # compression threads (default: 1, 0==# cores) \n");
     DISPLAYOUT( " -B#    : select size of each job (default: 0==automatic) \n");
     DISPLAYOUT( "--single-thread : use a single thread for both I/O and compression (result slightly different than -T1) \n");
+    DISPLAYOUT( "--auto-threads={physical,logical} (default: physical} : use either physical cores or logical cores as default when specifying -T0 \n");
     DISPLAYOUT( "--rsyncable : compress using a rsync-friendly method (-B sets block size) \n");
 # endif
     DISPLAYOUT( "--exclude-compressed: only compress files that are not already compressed \n");
@@ -349,6 +353,23 @@ static unsigned readU32FromChar(const char** stringPtr) {
     unsigned result;
     if (readU32FromCharChecked(stringPtr, &result)) { errorOut(errorMsg); }
     return result;
+}
+
+/*! readIntFromChar() :
+ * @return : signed integer value read from input in `char` format.
+ *  allows and interprets K, KB, KiB, M, MB and MiB suffix.
+ *  Will also modify `*stringPtr`, advancing it to position where it stopped reading.
+ *  Note : function will exit() program if digit sequence overflows */
+static int readIntFromChar(const char** stringPtr) {
+    static const char errorMsg[] = "error: numeric value overflows 32-bit int";
+    int sign = 1;
+    unsigned result;
+    if (**stringPtr=='-') {
+        (*stringPtr)++;
+        sign = -1;
+    }
+    if (readU32FromCharChecked(stringPtr, &result)) { errorOut(errorMsg); }
+    return (int) result * sign;
 }
 
 /*! readSizeTFromCharChecked() :
@@ -544,8 +565,8 @@ static ZDICT_fastCover_params_t defaultFastCoverParams(void)
 static unsigned parseAdaptParameters(const char* stringPtr, int* adaptMinPtr, int* adaptMaxPtr)
 {
     for ( ; ;) {
-        if (longCommandWArg(&stringPtr, "min=")) { *adaptMinPtr = (int)readU32FromChar(&stringPtr); if (stringPtr[0]==',') { stringPtr++; continue; } else break; }
-        if (longCommandWArg(&stringPtr, "max=")) { *adaptMaxPtr = (int)readU32FromChar(&stringPtr); if (stringPtr[0]==',') { stringPtr++; continue; } else break; }
+        if (longCommandWArg(&stringPtr, "min=")) { *adaptMinPtr = readIntFromChar(&stringPtr); if (stringPtr[0]==',') { stringPtr++; continue; } else break; }
+        if (longCommandWArg(&stringPtr, "max=")) { *adaptMaxPtr = readIntFromChar(&stringPtr); if (stringPtr[0]==',') { stringPtr++; continue; } else break; }
         DISPLAYLEVEL(4, "invalid compression parameter \n");
         return 0;
     }
@@ -720,10 +741,11 @@ typedef enum { zom_compress, zom_decompress, zom_test, zom_bench, zom_train, zom
 # define MAXCLEVEL  ZSTD_maxCLevel()
 #endif
 
-int main(int const argCount, const char* argv[])
+int main(int argCount, const char* argv[])
 {
     int argNb,
         followLinks = 0,
+        allowBlockDevices = 0,
         forceStdin = 0,
         forceStdout = 0,
         hasStdout = 0,
@@ -740,6 +762,9 @@ int main(int const argCount, const char* argv[])
         separateFiles = 0,
         setRealTimePrio = 0,
         singleThread = 0,
+#ifdef ZSTD_MULTITHREAD
+        defaultLogicalCores = 0,
+#endif
         showDefaultCParams = 0,
         ultra=0,
         contentSize=1;
@@ -838,7 +863,7 @@ int main(int const argCount, const char* argv[])
                 if (!strcmp(argument, "--compress")) { operation=zom_compress; continue; }
                 if (!strcmp(argument, "--decompress")) { operation=zom_decompress; continue; }
                 if (!strcmp(argument, "--uncompress")) { operation=zom_decompress; continue; }
-                if (!strcmp(argument, "--force")) { FIO_overwriteMode(prefs); forceStdin=1; forceStdout=1; followLinks=1; continue; }
+                if (!strcmp(argument, "--force")) { FIO_overwriteMode(prefs); forceStdin=1; forceStdout=1; followLinks=1; allowBlockDevices=1; continue; }
                 if (!strcmp(argument, "--version")) { printVersion(); CLEAN_RETURN(0); }
                 if (!strcmp(argument, "--help")) { usage_advanced(programName); CLEAN_RETURN(0); }
                 if (!strcmp(argument, "--verbose")) { g_displayLevel++; continue; }
@@ -877,7 +902,8 @@ int main(int const argCount, const char* argv[])
                 if (!strcmp(argument, "--rsyncable")) { rsyncable = 1; continue; }
                 if (!strcmp(argument, "--compress-literals")) { literalCompressionMode = ZSTD_lcm_huffman; continue; }
                 if (!strcmp(argument, "--no-compress-literals")) { literalCompressionMode = ZSTD_lcm_uncompressed; continue; }
-                if (!strcmp(argument, "--no-progress")) { FIO_setNoProgress(1); continue; }
+                if (!strcmp(argument, "--no-progress")) { FIO_setProgressSetting(FIO_ps_never); continue; }
+                if (!strcmp(argument, "--progress")) { FIO_setProgressSetting(FIO_ps_always); continue; }
                 if (!strcmp(argument, "--exclude-compressed")) { FIO_setExcludeCompressedFile(prefs, 1); continue; }
 
                 /* long commands with arguments */
@@ -928,6 +954,15 @@ int main(int const argCount, const char* argv[])
                 if (longCommandWArg(&argument, "--target-compressed-block-size=")) { targetCBlockSize = readSizeTFromChar(&argument); continue; }
                 if (longCommandWArg(&argument, "--size-hint=")) { srcSizeHint = readSizeTFromChar(&argument); continue; }
                 if (longCommandWArg(&argument, "--output-dir-flat")) { NEXT_FIELD(outDirName); continue; }
+#ifdef ZSTD_MULTITHREAD
+                if (longCommandWArg(&argument, "--auto-threads")) {
+                    const char* threadDefault = NULL;
+                    NEXT_FIELD(threadDefault);
+                    if (strcmp(threadDefault, "logical") == 0)
+                        defaultLogicalCores = 1;
+                    continue;
+                }
+#endif
 #ifdef UTIL_HAS_MIRRORFILELIST
                 if (longCommandWArg(&argument, "--output-dir-mirror")) { NEXT_FIELD(outMirroredDirName); continue; }
 #endif
@@ -1024,7 +1059,7 @@ int main(int const argCount, const char* argv[])
                 case 'D': argument++; NEXT_FIELD(dictFileName); break;
 
                     /* Overwrite */
-                case 'f': FIO_overwriteMode(prefs); forceStdin=1; forceStdout=1; followLinks=1; argument++; break;
+                case 'f': FIO_overwriteMode(prefs); forceStdin=1; forceStdout=1; followLinks=1; allowBlockDevices=1; argument++; break;
 
                     /* Verbose mode */
                 case 'v': g_displayLevel++; argument++; break;
@@ -1134,15 +1169,21 @@ int main(int const argCount, const char* argv[])
 #ifdef ZSTD_MULTITHREAD
     if ((nbWorkers==0) && (!singleThread)) {
         /* automatically set # workers based on # of reported cpus */
-        nbWorkers = UTIL_countPhysicalCores();
-        DISPLAYLEVEL(3, "Note: %d physical core(s) detected \n", nbWorkers);
+        if (defaultLogicalCores) {
+            nbWorkers = UTIL_countLogicalCores();
+            DISPLAYLEVEL(3, "Note: %d logical core(s) detected \n", nbWorkers);
+        } else {
+            nbWorkers = UTIL_countPhysicalCores();
+            DISPLAYLEVEL(3, "Note: %d physical core(s) detected \n", nbWorkers);
+        }
     }
 #else
     (void)singleThread; (void)nbWorkers;
 #endif
 
-#ifdef UTIL_HAS_CREATEFILELIST
     g_utilDisplayLevel = g_displayLevel;
+
+#ifdef UTIL_HAS_CREATEFILELIST
     if (!followLinks) {
         unsigned u, fileNamesNb;
         unsigned const nbFilenames = (unsigned)filenames->tableSize;
@@ -1331,6 +1372,7 @@ int main(int const argCount, const char* argv[])
     FIO_setNbFilesTotal(fCtx, (int)filenames->tableSize);
     FIO_determineHasStdinInput(fCtx, filenames);
     FIO_setNotificationLevel(g_displayLevel);
+    FIO_setAllowBlockDevices(prefs, allowBlockDevices);
     FIO_setPatchFromMode(prefs, patchFromDictFileName != NULL);
     if (memLimit == 0) {
         if (compressionParams.windowLog == 0) {

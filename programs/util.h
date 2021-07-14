@@ -22,7 +22,7 @@ extern "C" {
 #include "platform.h"     /* PLATFORM_POSIX_VERSION, ZSTD_NANOSLEEP_SUPPORT, ZSTD_SETPRIORITY_SUPPORT */
 #include <stddef.h>       /* size_t, ptrdiff_t */
 #include <sys/types.h>    /* stat, utime */
-#include <sys/stat.h>     /* stat, chmod, umask */
+#include <sys/stat.h>     /* stat, chmod */
 #include "../lib/common/mem.h"          /* U64 */
 
 
@@ -122,6 +122,7 @@ int UTIL_requireUserConfirmation(const char* prompt, const char* abortMsg, const
 #define STRDUP(s) strdup(s)
 #endif
 
+
 /**
  * Calls platform's equivalent of stat() on filename and writes info to statbuf.
  * Returns success (1) or failure (0).
@@ -143,6 +144,7 @@ int UTIL_setFileStat(const char* filename, const stat_t* statbuf);
 int UTIL_isRegularFileStat(const stat_t* statbuf);
 int UTIL_isDirectoryStat(const stat_t* statbuf);
 int UTIL_isFIFOStat(const stat_t* statbuf);
+int UTIL_isBlockDevStat(const stat_t* statbuf);
 U64 UTIL_getFileSizeStat(const stat_t* statbuf);
 
 /**
@@ -151,11 +153,6 @@ U64 UTIL_getFileSizeStat(const stat_t* statbuf);
  * check whether it should be modified.
  */
 int UTIL_chmod(char const* filename, const stat_t* statbuf, mode_t permissions);
-
-/**
- * Wraps umask(). Does nothing when the platform doesn't have that concept.
- */
-int UTIL_umask(int mode);
 
 /*
  * In the absence of a pre-existing stat result on the file in question, these
@@ -173,6 +170,19 @@ int UTIL_isFIFO(const char* infilename);
 #define UTIL_FILESIZE_UNKNOWN  ((U64)(-1))
 U64 UTIL_getFileSize(const char* infilename);
 U64 UTIL_getTotalFileSize(const char* const * fileNamesTable, unsigned nbFiles);
+
+/**
+ * Take a size in bytes and prepare the components to pretty-print it in a
+ * scaled way. The components in the returned struct should be passed in
+ * precision, value, suffix order to a "%.*f%s" format string.
+ */
+typedef struct {
+  double value;
+  int precision;
+  const char* suffix;
+} UTIL_HumanReadableSize_t;
+
+UTIL_HumanReadableSize_t UTIL_makeHumanReadableSize(U64 size);
 
 int UTIL_compareStr(const void *p1, const void *p2);
 const char* UTIL_getFileExtension(const char* infilename);
@@ -279,13 +289,19 @@ void UTIL_refFilename(FileNamesTable* fnt, const char* filename);
 FileNamesTable*
 UTIL_createExpandedFNT(const char* const* filenames, size_t nbFilenames, int followLinks);
 
+#if defined(_WIN32) || defined(WIN32)
+DWORD CountSetBits(ULONG_PTR bitMask);
+#endif
 
 /*-****************************************
  *  System
  ******************************************/
 
+int UTIL_countCores(int logical);
+
 int UTIL_countPhysicalCores(void);
 
+int UTIL_countLogicalCores(void);
 
 #if defined (__cplusplus)
 }

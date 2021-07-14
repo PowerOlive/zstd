@@ -14,15 +14,13 @@ libzstd_includes = [include_directories(join_paths(zstd_rootdir,'lib'),
   join_paths(zstd_rootdir, 'lib/common'),
   join_paths(zstd_rootdir, 'lib/compress'),
   join_paths(zstd_rootdir, 'lib/decompress'),
-  join_paths(zstd_rootdir, 'lib/dictBuilder'),
-  join_paths(zstd_rootdir, 'lib/deprecated'))]
+  join_paths(zstd_rootdir, 'lib/dictBuilder'))]
 
 libzstd_sources = [join_paths(zstd_rootdir, 'lib/common/entropy_common.c'),
   join_paths(zstd_rootdir, 'lib/common/fse_decompress.c'),
   join_paths(zstd_rootdir, 'lib/common/threading.c'),
   join_paths(zstd_rootdir, 'lib/common/pool.c'),
   join_paths(zstd_rootdir, 'lib/common/zstd_common.c'),
-  join_paths(zstd_rootdir, 'lib/common/zstd_trace.c'),
   join_paths(zstd_rootdir, 'lib/common/error_private.c'),
   join_paths(zstd_rootdir, 'lib/common/xxhash.c'),
   join_paths(zstd_rootdir, 'lib/compress/hist.c'),
@@ -45,10 +43,7 @@ libzstd_sources = [join_paths(zstd_rootdir, 'lib/common/entropy_common.c'),
   join_paths(zstd_rootdir, 'lib/dictBuilder/cover.c'),
   join_paths(zstd_rootdir, 'lib/dictBuilder/fastcover.c'),
   join_paths(zstd_rootdir, 'lib/dictBuilder/divsufsort.c'),
-  join_paths(zstd_rootdir, 'lib/dictBuilder/zdict.c'),
-  join_paths(zstd_rootdir, 'lib/deprecated/zbuff_common.c'),
-  join_paths(zstd_rootdir, 'lib/deprecated/zbuff_compress.c'),
-  join_paths(zstd_rootdir, 'lib/deprecated/zbuff_decompress.c')]
+  join_paths(zstd_rootdir, 'lib/dictBuilder/zdict.c')]
 
 # Explicit define legacy support
 add_project_arguments('-DZSTD_LEGACY_SUPPORT=@0@'.format(legacy_level),
@@ -128,5 +123,5 @@ pkgconfig.generate(libzstd,
   url: 'http://www.zstd.net/')
 
 install_headers(join_paths(zstd_rootdir, 'lib/zstd.h'),
-  join_paths(zstd_rootdir, 'lib/dictBuilder/zdict.h'),
-  join_paths(zstd_rootdir, 'lib/common/zstd_errors.h'))
+  join_paths(zstd_rootdir, 'lib/zdict.h'),
+  join_paths(zstd_rootdir, 'lib/zstd_errors.h'))
